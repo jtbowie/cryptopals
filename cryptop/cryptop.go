@@ -4,6 +4,7 @@ import "encoding/hex"
 import "encoding/base64"
 import "errors"
 import "math"
+import "unicode"
 //import "strings"
 import "log"
 
@@ -73,32 +74,32 @@ func EnglishScore(ptxt []byte) float64 {
 	'w' : 0.0171,
 	'x' : 0.0013,
 	'z' : 0.0007,
-	' ' : 0.1918 }
+	' ' : 0.2918 }
 
 	score := float64(0)
 	obsv := RuneCounter(ptxt)
 
-
 	for ch := range obsv {
 		if freq, ok := exFreqs[ch]; ok {
-			score += math.Pow(obsv[ch]-freq,2.0)
+			score += math.Pow(obsv[ch]-freq,2.0) * 1.5
 		} else {
-			score -= obsv[ch]
+			score += obsv[ch]
 		}
 	}
 
 	return score
 }
 
-func RuneCounter(work []byte) map[rune]float64 {
+func RuneCounter(rArr []byte) map[rune]float64 {
 	output := make(map[rune]float64)
-
-	for i:=0;i<len(work);i++ {
-		output[rune(work[i])]++
+	work := byte(0)
+	for i:=0;i<len(rArr);i++ {
+		work = byte(unicode.ToLower(rune(rArr[i])))
+		output[rune(work)]++
 	}
 
-	for i:=0;i<len(output);i++ {
-		output[rune(work[i])] = output[rune(work[i])] / float64(len(work))
+	for ch:= range output {
+		output[ch] /= float64(len(rArr))
 	}
 
 	return output
@@ -121,4 +122,25 @@ func XorRepeatKey(work []byte, key []byte) []byte {
 	}
 
 	return out
+}
+
+func EditDistance(b1 []byte, b2 []byte) uint64 {
+
+	w1 := make([]byte, len(b1))
+	w2 := make([]byte, len(b2))
+	copy(w1, b1)
+	copy(w2, b2)
+	count := uint64(0)
+
+	for x:=0;x<len(b1);x++ {
+		for i:=0;i<8;i++ {
+			if w1[x] & 1 != w2[x] & 1 {
+				count++
+			}
+			w1[x] >>= 1
+			w2[x] >>= 1
+		}
+	}
+
+	return count
 }
