@@ -5,6 +5,7 @@ import "encoding/base64"
 import "errors"
 import "math"
 import "unicode"
+import "crypto/aes"
 //import "strings"
 import "log"
 
@@ -143,4 +144,35 @@ func EditDistance(b1 []byte, b2 []byte) uint64 {
 	}
 
 	return count
+}
+
+func AesEcbDecrypt(ctext []byte, key []byte) []byte {
+	aesBlock,err := aes.NewCipher(key)
+	if err != nil {
+		panic(err)
+	}
+
+	blockSz := len(key)
+	output := make([]byte, len(ctext))
+
+	for y:=0;y<len(ctext)-blockSz;y+=blockSz {
+		aesBlock.Decrypt(output[y:y+blockSz],ctext[y:y+blockSz])
+	}
+
+	return output
+}
+
+func DetectAesEcb(ctext []byte) int {
+	blockSz := 16
+	blockCnt := len(ctext) / blockSz
+	work := make(map[string]int)
+	for y:=0;y<len(ctext);y+=blockSz {
+		work[string(ctext[y:y+blockSz])]++
+	}
+
+	if len(work) < blockCnt {
+		return blockCnt - len(work)
+	}
+
+	return 0
 }

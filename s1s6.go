@@ -62,11 +62,12 @@ func main() {
 			score = cryptop.EnglishScore(res) / float64(len(transArr[1]))
 			score *= 1000
 			if score < 2.5 {
-				fmt.Println(string(res),score,x)
+			//	fmt.Println(string(res),score,x)
 				key[i] = byte(x)
 			}
 		}
 	}
 
 	fmt.Println(string(key))
+	fmt.Println(string(cryptop.XorRepeatKey(fbytes,key)))
 }
