@@ -4,8 +4,10 @@ import "encoding/hex"
 import "encoding/base64"
 import "errors"
 import "math"
+import "time"
 import "unicode"
 import "crypto/aes"
+import "crypto/rand"
 //import "strings"
 import "log"
 
@@ -146,20 +148,110 @@ func EditDistance(b1 []byte, b2 []byte) uint64 {
 	return count
 }
 
-func AesEcbDecrypt(ctext []byte, key []byte) []byte {
-	aesBlock,err := aes.NewCipher(key)
+func AesEcbDecrypt(ct []byte, k []byte) []byte {
+	aesBlock,err := aes.NewCipher(k)
 	if err != nil {
 		panic(err)
 	}
 
-	blockSz := len(key)
-	output := make([]byte, len(ctext))
+	bSz := len(ct)
+	blSz := len(k)
+	blCnt := bSz / blSz
+	pt := make([]byte, bSz)
 
-	for y:=0;y<len(ctext)-blockSz;y+=blockSz {
-		aesBlock.Decrypt(output[y:y+blockSz],ctext[y:y+blockSz])
+	for y:=0;y<blCnt;y++ {
+		aesBlock.Decrypt(pt[y*blSz:blSz*y+blSz],ct[y*blSz:y*blSz+blSz])
 	}
 
-	return output
+	return pt
+}
+
+func aesEcbEncrypt(pt []byte, k []byte) []byte {
+	aesBlock,err := aes.NewCipher(k)
+	if err != nil {
+		panic(err)
+	}
+
+	bSz := len(pt)
+	blSz := len(k)
+	blCnt := bSz / blSz
+	ct := make([]byte,bSz)
+
+	for i:=0;i<blCnt;i++ {
+		aesBlock.Encrypt(ct[blSz*i:blSz*i+blSz],pt[blSz*i:blSz*i+blSz])
+	}
+
+	return ct
+}
+
+func (enc *CbcEncr) CbcEncrypt(pt []byte) ([]byte, error) {
+	cipher,err := aes.NewCipher(enc.Key)
+	if err != nil {
+		return pt,err
+	}
+
+	keySz := len(enc.Key)
+
+	if keySz != len(enc.Iv) {
+		err = errors.New("CbcEncrypt: len(iv) != len(key)")
+		return pt,err
+	}
+
+	blockCnt := len(pt) / keySz
+	padSz := blockCnt % keySz
+
+	if padSz != 0 {
+		blockCnt++
+	}
+
+	ct := make([]byte,blockCnt * keySz)
+	padPt := make([]byte, blockCnt * keySz)
+	copy(padPt, pt)
+
+	nextXor := enc.Iv
+
+	var xorbl []byte
+	for i:=0;i<blockCnt;i++ {
+		xorbl = XorRepeatKey(nextXor,padPt[keySz*i:keySz*i+keySz])
+		cipher.Encrypt(ct[keySz*i:keySz*i+keySz], xorbl)
+		nextXor = ct[keySz*i:keySz*i+keySz]
+	}
+
+	return ct,nil
+}
+
+func (enc *CbcEncr) CbcDecrypt(ct []byte) ([]byte, error) {
+	cipher,err := aes.NewCipher(enc.Key)
+	if err != nil {
+		return ct, errors.New("CbcDecrypt Cipher creation failed")
+	}
+
+	blockSz := len(enc.Key)
+	bufSz	:= len(ct)
+	blockCnt := bufSz / blockSz
+	if blockSz != len(enc.Iv) {
+		return ct, errors.New("CbcDecrypt key size != iv size")
+	}
+
+	if (bufSz % blockCnt) != 0 {
+		return ct, errors.New("CbcDecrypt ct not even blocksize")
+	}
+
+	pt := make([]byte, bufSz)
+	prevXor := make([]byte, blockSz)
+
+	for i:=0;i<blockCnt;i++ {
+		cipher.Decrypt(prevXor, ct[blockSz*i:blockSz*i+blockSz])
+		if i > 0 {
+			prevXor = XorRepeatKey(prevXor, ct[blockSz*(i-1):blockSz*i+blockSz])
+			copy(pt[blockSz*i:blockSz*i+blockSz], prevXor)
+		} else {
+			prevXor = XorRepeatKey(prevXor, enc.Iv)
+			copy(pt[:blockSz], prevXor)
+		}
+	}
+
+	return pt,nil
 }
 
 func DetectAesEcb(ctext []byte) int {
@@ -176,3 +268,57 @@ func DetectAesEcb(ctext []byte) int {
 
 	return 0
 }
+
+func PKCS7Pad(b []byte, k int) []byte {
+	padSz := k - len(b) % k
+	blocks := (len(b) / k) + k
+	padBlocks := padSz * blocks
+	if padBlocks == 0 {
+		padBlocks = len(b) + k
+		padSz = k
+	}
+	output := []byte{}
+	output = append(b)
+	for i:=0;i<padSz;i++ {
+		output = append(output, byte(padSz))
+	}
+	return output
+}
+
+func GenRandAesKey() []byte {
+	output := make([]byte, 16)
+	rand.Read(output)
+	return output
+}
+
+func EcbCbcOracle(p []byte) []byte {
+	k := GenRandAesKey()
+	iv := GenRandAesKey()
+	if k[GenSeed() % len(k)] % 2 > 0 {
+		return aesEcbEncrypt(p, k)
+	} else {
+		enc := CbcEncr{k,iv}
+		ct,err := enc.CbcEncrypt(p)
+		if err != nil {
+			panic(err)
+		}
+		return ct
+	}
+}
+
+func GenSeed() int {
+	return time.Now().Nanosecond()
+}
+
+func GenRandBytes(c int) []byte {
+	o := make([]byte, c)
+	rand.Read(o)
+	return o
+}
+
+type CbcEncr struct {
+	Key []byte
+	Iv  []byte
+}
+
+const randKey := []byte{48,242,15,144,253,242,27,205,46,91,84,60,143,217,179,44}
