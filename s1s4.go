@@ -26,10 +26,9 @@ func main() {
 		for x:=0;x<256;x++ {
 			test = cryptop.XorSingleByte(work,byte(x))
 			val = cryptop.EnglishScore(test)
-			if val > 5.5 {
-				y := strings.Index(string(test), " ")
-				if y > 0 {
-					fmt.Println(string(test[:len(test)-1]) + " " + fmt.Sprintf("0x%x",x))
+			if val < 2.75 {
+				if val > 1 {
+					fmt.Printf("%f 0x%x\n", val, x)
 				}
 			}
 		}

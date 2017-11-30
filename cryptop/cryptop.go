@@ -4,11 +4,13 @@ import "encoding/hex"
 import "encoding/base64"
 import "errors"
 import "math"
+import "bytes"
 import "time"
 import "unicode"
 import "crypto/aes"
 import "crypto/rand"
-//import "strings"
+import "strings"
+//import "fmt"
 import "log"
 
 func HexStrToByteArray(work string) []byte {
@@ -254,7 +256,7 @@ func (enc *CbcEncr) CbcDecrypt(ct []byte) ([]byte, error) {
 	return pt,nil
 }
 
-func DetectAesEcb(ctext []byte) int {
+func DetectAesEcb(ctext []byte) bool {
 	blockSz := 16
 	blockCnt := len(ctext) / blockSz
 	work := make(map[string]int)
@@ -263,10 +265,12 @@ func DetectAesEcb(ctext []byte) int {
 	}
 
 	if len(work) < blockCnt {
-		return blockCnt - len(work)
+		if blockCnt - len(work) > 1 {
+			return true
+		}
 	}
 
-	return 0
+	return false
 }
 
 func PKCS7Pad(b []byte, k int) []byte {
@@ -306,6 +310,125 @@ func EcbCbcOracle(p []byte) []byte {
 	}
 }
 
+func EcbSingleByteOracle(pt []byte, magick []byte, off int) []byte {
+	magickStr := []byte{}
+	var err error
+
+	if magick == nil {
+		magickStr,err = base64.StdEncoding.DecodeString(ecbmagick)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	magickPt := []byte{}
+	if pt != nil {
+		if off > 0 {
+			magic2d := make([][]byte, 3)
+			magic2d[0] = magickStr[0:off]
+			magic2d[1] = pt
+			magic2d[2] = magickStr[off:]
+			magickPt = concatAppend(magic2d)
+		} else {
+			magickPt = append(pt, magickStr...)
+			magickPt = append(magickPt, pt...)
+		}
+	} else {
+		magickPt = append(magickStr)
+	}
+
+	keyLen := len(randKey)
+
+	return aesEcbEncrypt(PKCS7Pad(magickPt, keyLen), randKey)
+}
+
+func MakeAesEcbDictionary(temp []byte) map[byte][]byte {
+	aesKeyMap := make(map[byte][]byte)
+	baseStr := make([]byte, len(temp))
+	newStr := make([]byte,16)
+
+	copy(baseStr, temp)
+
+	for i:=0;i<256;i++ {
+		newStr = append([]byte(baseStr), byte(i))
+		aesKeyMap[byte(i)] = aesEcbEncrypt(newStr, randKey)
+	}
+
+	return aesKeyMap
+}
+
+func FindAesEcbKeyLen(str []byte) int {
+	magick  := []byte{}
+	preLoad := []byte{}
+	opStr	:= []byte{}
+	magickLens := []byte{15,16,23,24,31,32}
+	var err error
+
+	if str == nil {
+		magick,err = base64.StdEncoding.DecodeString(ecbmagick)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		copy(magick, str)
+	}
+
+	prevBlock := make([]byte, 32)
+	block := []byte{}
+	preLoad = []byte{byte('A')}
+
+	for i:=0;i<33;i++ {
+		if bytes.IndexByte(magickLens, byte(i)) >= 0 {
+			opStr = append(preLoad, []byte(magick)...)
+			if i % 2 == 0 {
+				block = EcbSingleByteOracle(opStr, nil,0)[0:i]
+				if bytes.Equal(block[0:i], prevBlock[0:i]) {
+					return i
+				}
+			} else {
+				block = EcbSingleByteOracle(opStr, nil,0)[0:i+1]
+			}
+
+			copy(prevBlock, block)
+		}
+		preLoad = append(preLoad, byte('A'))
+	}
+
+	return -1
+}
+
+func ParseCookie(cook string) map[string]string {
+
+	parCook := strings.Split(cook, "&")
+	out := make(map[string]string, len(parCook))
+	kv := make([]string, 2)
+
+	for id := range parCook {
+		kv = strings.Split(parCook[id], "=")
+		out[kv[0]] = kv[1]
+	}
+	return out
+}
+
+func GenProfileByEmail(email string, admin bool) string {
+	sep := "&"
+	str := "email="
+	for ind := range []byte(email) {
+		if email[ind] != '&' && email[ind] != '=' {
+			str += string(email[ind])
+		}
+	}
+
+	str += sep + "uid=10"
+	if admin {
+		str += sep + "role=admin"
+	} else {
+		str += sep + "role=user"
+	}
+
+	return(str)
+}
+
 func GenSeed() int {
 	return time.Now().Nanosecond()
 }
@@ -316,9 +439,18 @@ func GenRandBytes(c int) []byte {
 	return o
 }
 
+func concatAppend(slices [][]byte) []byte {
+    var tmp []byte
+    for _, s := range slices {
+        tmp = append(tmp, s...)
+    }
+    return tmp
+}
+
 type CbcEncr struct {
 	Key []byte
 	Iv  []byte
 }
 
-const randKey := []byte{48,242,15,144,253,242,27,205,46,91,84,60,143,217,179,44}
+var randKey = []byte {48,242,15,144,253,242,27,205,46,91,84,60,143,217,179,44}
+const ecbmagick string = "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK"
